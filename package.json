@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "prepare": "git config core.hooksPath .githooks",
     "lint": "eslint",
     "update-basemap": "./scripts/update-basemap.sh"
   },
