@@ -238,46 +238,6 @@ export default function TransitMap() {
     m.addControl(new maplibregl.NavigationControl(), "top-right");
 
     m.on("load", async () => {
-      // Add a subtle gradient overlay on water to create depth
-      m.addSource("water-gradient", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              geometry: {
-                type: "Point",
-                coordinates: [-122.38, 37.78], // Center of SF Bay
-              },
-              properties: {},
-            },
-          ],
-        },
-      });
-
-      m.addLayer(
-        {
-          id: "water-glow",
-          type: "circle",
-          source: "water-gradient",
-          paint: {
-            "circle-radius": [
-              "interpolate",
-              ["linear"],
-              ["zoom"],
-              8, 200,
-              12, 800,
-              14, 1500,
-            ],
-            "circle-color": "#0f2a4a",
-            "circle-blur": 1,
-            "circle-opacity": 0.3,
-          },
-        },
-        // Insert below land layers — find first land-related layer
-        m.getStyle().layers.find((l) => l.id.includes("earth"))?.id
-      );
 
       // Load route shapes
       try {
@@ -321,22 +281,29 @@ export default function TransitMap() {
         data: { type: "FeatureCollection", features: [] },
       });
 
+      // Outer glow
+      m.addLayer({
+        id: "vehicle-glow",
+        type: "circle",
+        source: "vehicles",
+        paint: {
+          "circle-radius": 10,
+          "circle-color": "#e6be42",
+          "circle-blur": 1,
+          "circle-opacity": 0.4,
+        },
+      });
+
+      // Bright core
       m.addLayer({
         id: "vehicle-markers",
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 5,
-          "circle-color": [
-            "match",
-            ["get", "agency"],
-            "SF", "#ff6b4a",
-            "BA", "#4dc9f6",
-            "CT", "#ff4466",
-            "#aaaaaa",
-          ],
-          "circle-stroke-color": "#0a1628",
-          "circle-stroke-width": 1,
+          "circle-radius": 3,
+          "circle-color": "#e6be42",
+          "circle-blur": 0.7,
+          "circle-opacity": 0.9,
         },
       });
 
