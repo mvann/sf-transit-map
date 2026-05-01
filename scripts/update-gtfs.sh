@@ -33,11 +33,11 @@ for agency in $AGENCIES; do
     "$API_BASE?api_key=${TRANSIT_511_API_KEY}&operator_id=${agency}" \
     -o "$TEMP_DIR/${agency}.zip"
   mkdir -p "$TEMP_DIR/${agency}"
-  unzip -qo "$TEMP_DIR/${agency}.zip" shapes.txt routes.txt trips.txt -d "$TEMP_DIR/${agency}"
+  unzip -qo "$TEMP_DIR/${agency}.zip" shapes.txt routes.txt trips.txt stops.txt stop_times.txt -d "$TEMP_DIR/${agency}"
 done
 
-echo "Processing route shapes..."
-node "$SCRIPT_DIR/process-gtfs-shapes.mjs" "$TEMP_DIR" "$DATA_DIR/routes.json"
+echo "Processing route shapes and stops..."
+node "$SCRIPT_DIR/process-gtfs-shapes.mjs" "$TEMP_DIR" "$DATA_DIR/routes.json" "$DATA_DIR/route-stops.json"
 
 rm -rf "$TEMP_DIR"
-echo "Done! Output: $DATA_DIR/routes.json"
+echo "Done! Output: $DATA_DIR/routes.json, $DATA_DIR/route-stops.json"

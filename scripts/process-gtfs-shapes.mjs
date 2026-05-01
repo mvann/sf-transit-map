@@ -1,8 +1,9 @@
 /**
- * Processes GTFS shapes.txt, routes.txt, and trips.txt into a GeoJSON
- * FeatureCollection of route line geometries.
+ * Processes GTFS data into:
+ * 1. GeoJSON FeatureCollection of route line geometries
+ * 2. Route-to-stops mapping with stop locations
  *
- * Usage: node process-gtfs-shapes.mjs <tempDir> <outputPath>
+ * Usage: node process-gtfs-shapes.mjs <tempDir> <routesOutput> <stopsOutput>
  */
 
 import { readFileSync, writeFileSync } from "fs";
@@ -11,9 +12,12 @@ import { join } from "path";
 const AGENCIES = ["SF", "BA", "CT"];
 const tempDir = process.argv[2];
 const outputPath = process.argv[3];
+const stopsOutputPath = process.argv[4];
 
-if (!tempDir || !outputPath) {
-  console.error("Usage: node process-gtfs-shapes.mjs <tempDir> <outputPath>");
+if (!tempDir || !outputPath || !stopsOutputPath) {
+  console.error(
+    "Usage: node process-gtfs-shapes.mjs <tempDir> <routesOutput> <stopsOutput>"
+  );
   process.exit(1);
 }
 
@@ -136,3 +140,93 @@ const geojson = {
 
 writeFileSync(outputPath, JSON.stringify(geojson));
 console.log(`  Wrote ${features.length} route features`);
+
+// --- Process route stops ---
+// Build a mapping: { "agency:routeId": [{ stopId, stopName, lat, lng }] }
+
+function parseStops(agencyDir) {
+  const text = readFileSync(join(agencyDir, "stops.txt"), "utf-8");
+  const rows = parseCsv(text);
+  const stops = new Map();
+  for (const row of rows) {
+    stops.set(row.stop_id, {
+      stopId: row.stop_id,
+      stopName: row.stop_name,
+      lat: parseFloat(row.stop_lat),
+      lng: parseFloat(row.stop_lon),
+    });
+  }
+  return stops;
+}
+
+function parseStopTimes(agencyDir) {
+  const text = readFileSync(join(agencyDir, "stop_times.txt"), "utf-8");
+  const rows = parseCsv(text);
+  // Map trip_id -> ordered list of stop_ids
+  const tripStops = new Map();
+  for (const row of rows) {
+    const tripId = row.trip_id;
+    if (!tripStops.has(tripId)) tripStops.set(tripId, []);
+    tripStops.get(tripId).push({
+      stopId: row.stop_id,
+      seq: parseInt(row.stop_sequence, 10),
+    });
+  }
+  // Sort by sequence
+  for (const [, stops] of tripStops) {
+    stops.sort((a, b) => a.seq - b.seq);
+  }
+  return tripStops;
+}
+
+function parseTripsForStops(agencyDir) {
+  const text = readFileSync(join(agencyDir, "trips.txt"), "utf-8");
+  const rows = parseCsv(text);
+  // Map route_id -> Set of trip_ids
+  const routeTrips = new Map();
+  for (const row of rows) {
+    if (!routeTrips.has(row.route_id)) routeTrips.set(row.route_id, []);
+    routeTrips.get(row.route_id).push(row.trip_id);
+  }
+  return routeTrips;
+}
+
+const routeStops = {};
+
+for (const agency of AGENCIES) {
+  const agencyDir = join(tempDir, agency);
+  console.log(`  Processing stops for ${agency}...`);
+
+  const stops = parseStops(agencyDir);
+  const tripStops = parseStopTimes(agencyDir);
+  const routeTrips = parseTripsForStops(agencyDir);
+
+  for (const [routeId, tripIds] of routeTrips) {
+    const key = `${agency}:${routeId}`;
+    // Use the first trip's stop sequence as representative
+    const representativeTrip = tripIds[0];
+    const stopSequence = tripStops.get(representativeTrip);
+    if (!stopSequence) continue;
+
+    // Deduplicate stops (same stop can appear in sequence)
+    const seen = new Set();
+    const routeStopList = [];
+    for (const { stopId } of stopSequence) {
+      if (seen.has(stopId)) continue;
+      seen.add(stopId);
+      const stop = stops.get(stopId);
+      if (stop) routeStopList.push(stop);
+    }
+
+    routeStops[key] = routeStopList;
+  }
+}
+
+writeFileSync(stopsOutputPath, JSON.stringify(routeStops));
+const totalStopEntries = Object.values(routeStops).reduce(
+  (sum, arr) => sum + arr.length,
+  0
+);
+console.log(
+  `  Wrote ${Object.keys(routeStops).length} route-stop mappings (${totalStopEntries} total stops)`
+);
