@@ -45,3 +45,6 @@ next-env.d.ts
 
 # basemap tiles (generated via scripts/update-basemap.sh)
 /public/tiles/
+
+# GTFS route data (generated via scripts/update-gtfs.sh)
+/public/data/
