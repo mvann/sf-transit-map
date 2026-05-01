@@ -1,19 +1,55 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
 import { layers, namedFlavor } from "@protomaps/basemaps";
+import type { VehiclePosition } from "@/types/transit";
 
 const SF_CENTER: [number, number] = [-122.4194, 37.7749];
 const DEFAULT_ZOOM = 11;
+const VEHICLE_POLL_INTERVAL = 15_000;
 
 let protocolAdded = false;
 
 export default function TransitMap() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const updateVehicles = useCallback(async () => {
+    const m = map.current;
+    if (!m || !m.getSource("vehicles")) return;
+
+    try {
+      const res = await fetch("/api/vehicles");
+      if (!res.ok) return;
+      const vehicles: VehiclePosition[] = await res.json();
+
+      const geojson: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: vehicles.map((v) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [v.longitude, v.latitude],
+          },
+          properties: {
+            vehicleId: v.vehicleId,
+            lineRef: v.lineRef,
+            lineName: v.lineName,
+            agency: v.agency,
+            bearing: v.bearing ?? 0,
+          },
+        })),
+      };
+
+      (m.getSource("vehicles") as maplibregl.GeoJSONSource).setData(geojson);
+    } catch (e) {
+      console.error("Failed to update vehicles:", e);
+    }
+  }, []);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -24,7 +60,7 @@ export default function TransitMap() {
       protocolAdded = true;
     }
 
-    map.current = new maplibregl.Map({
+    const m = new maplibregl.Map({
       container: mapContainer.current,
       center: SF_CENTER,
       zoom: DEFAULT_ZOOM,
@@ -46,13 +82,74 @@ export default function TransitMap() {
       },
     });
 
-    map.current.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.current = m;
+    m.addControl(new maplibregl.NavigationControl(), "top-right");
+
+    m.on("load", async () => {
+      // Load route shapes
+      try {
+        const res = await fetch("/data/routes.json");
+        const routesGeojson = await res.json();
+
+        m.addSource("routes", {
+          type: "geojson",
+          data: routesGeojson,
+        });
+
+        m.addLayer({
+          id: "route-lines",
+          type: "line",
+          source: "routes",
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": 3,
+            "line-opacity": 0.7,
+          },
+          layout: {
+            "line-cap": "round",
+            "line-join": "round",
+          },
+        });
+      } catch (e) {
+        console.error("Failed to load routes:", e);
+      }
+
+      // Set up vehicles source and layer
+      m.addSource("vehicles", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      m.addLayer({
+        id: "vehicle-markers",
+        type: "circle",
+        source: "vehicles",
+        paint: {
+          "circle-radius": 5,
+          "circle-color": [
+            "match",
+            ["get", "agency"],
+            "SF", "#c23b22",
+            "BA", "#009bda",
+            "CT", "#e31837",
+            "#888888",
+          ],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
+        },
+      });
+
+      // Fetch initial vehicles and start polling
+      await updateVehicles();
+      pollTimer.current = setInterval(updateVehicles, VEHICLE_POLL_INTERVAL);
+    });
 
     return () => {
-      map.current?.remove();
+      if (pollTimer.current) clearInterval(pollTimer.current);
+      m.remove();
       map.current = null;
     };
-  }, []);
+  }, [updateVehicles]);
 
   return <div ref={mapContainer} className="w-full h-full" />;
 }
