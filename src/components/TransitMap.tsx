@@ -4,7 +4,8 @@ import { useEffect, useRef, useCallback } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Protocol } from "pmtiles";
-import { layers, namedFlavor } from "@protomaps/basemaps";
+import { layers } from "@protomaps/basemaps";
+import { oceanFlavor } from "@/lib/map-theme";
 import type { VehiclePosition } from "@/types/transit";
 
 const SF_CENTER: [number, number] = [-122.4194, 37.7749];
@@ -43,8 +44,8 @@ export default function TransitMap() {
 
     // Reset route highlight
     if (m.getLayer("route-lines")) {
-      m.setPaintProperty("route-lines", "line-width", 3);
-      m.setPaintProperty("route-lines", "line-opacity", 0.7);
+      m.setPaintProperty("route-lines", "line-width", 2.5);
+      m.setPaintProperty("route-lines", "line-opacity", 0.8);
     }
     if (m.getLayer("route-lines-highlight")) {
       m.removeLayer("route-lines-highlight");
@@ -91,7 +92,7 @@ export default function TransitMap() {
       );
 
       // Dim other routes
-      m.setPaintProperty("route-lines", "line-opacity", 0.2);
+      m.setPaintProperty("route-lines", "line-opacity", 0.15);
 
       // Show stops for this route
       const key = `${agency}:${routeId}`;
@@ -220,7 +221,7 @@ export default function TransitMap() {
         glyphs:
           "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf",
         sprite:
-          "https://protomaps.github.io/basemaps-assets/sprites/v4/light",
+          "https://protomaps.github.io/basemaps-assets/sprites/v4/dark",
         sources: {
           protomaps: {
             type: "vector",
@@ -229,7 +230,7 @@ export default function TransitMap() {
               '<a href="https://protomaps.com">Protomaps</a> © <a href="https://openstreetmap.org">OpenStreetMap</a>',
           },
         },
-        layers: layers("protomaps", namedFlavor("light"), { lang: "en" }),
+        layers: layers("protomaps", oceanFlavor, { lang: "en" }),
       },
     });
 
@@ -237,6 +238,7 @@ export default function TransitMap() {
     m.addControl(new maplibregl.NavigationControl(), "top-right");
 
     m.on("load", async () => {
+
       // Load route shapes
       try {
         const res = await fetch("/data/routes.json");
@@ -253,8 +255,8 @@ export default function TransitMap() {
           source: "routes",
           paint: {
             "line-color": ["get", "color"],
-            "line-width": 3,
-            "line-opacity": 0.7,
+            "line-width": 2.5,
+            "line-opacity": 0.8,
           },
           layout: {
             "line-cap": "round",
@@ -279,22 +281,29 @@ export default function TransitMap() {
         data: { type: "FeatureCollection", features: [] },
       });
 
+      // Outer glow
+      m.addLayer({
+        id: "vehicle-glow",
+        type: "circle",
+        source: "vehicles",
+        paint: {
+          "circle-radius": 10,
+          "circle-color": "#e6be42",
+          "circle-blur": 1,
+          "circle-opacity": 0.4,
+        },
+      });
+
+      // Bright core
       m.addLayer({
         id: "vehicle-markers",
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 5,
-          "circle-color": [
-            "match",
-            ["get", "agency"],
-            "SF", "#c23b22",
-            "BA", "#009bda",
-            "CT", "#e31837",
-            "#888888",
-          ],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-radius": 3,
+          "circle-color": "#e6be42",
+          "circle-blur": 0.7,
+          "circle-opacity": 0.9,
         },
       });
 
