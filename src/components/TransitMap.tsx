@@ -321,14 +321,28 @@ export default function TransitMap() {
         data: { type: "FeatureCollection", features: [] },
       });
 
+      // Vehicle color expression:
+      // BART: #FB8501, Caltrain: #8CC0EF, Muni Metro: #4CAF50, Muni Bus: #e6be42
+      const vehicleColor: maplibregl.ExpressionSpecification = [
+        "case",
+        ["==", ["get", "agency"], "BA"], "#c040a0",
+        ["==", ["get", "agency"], "CT"], "#c44040",
+        [
+          "all",
+          ["==", ["get", "agency"], "SF"],
+          ["in", ["get", "lineRef"], ["literal", ["J", "K", "L", "M", "N", "T", "S"]]],
+        ], "#4CAF50",
+        "#e6be42", // Muni bus default
+      ];
+
       // Outer glow
       m.addLayer({
         id: "vehicle-glow",
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 10,
-          "circle-color": "#e6be42",
+          "circle-radius": 12.5,
+          "circle-color": vehicleColor,
           "circle-blur": 1,
           "circle-opacity": 0.4,
         },
@@ -340,8 +354,8 @@ export default function TransitMap() {
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 3,
-          "circle-color": "#e6be42",
+          "circle-radius": 3.75,
+          "circle-color": vehicleColor,
           "circle-blur": 0.7,
           "circle-opacity": 0.9,
         },
