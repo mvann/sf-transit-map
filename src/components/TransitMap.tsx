@@ -10,7 +10,7 @@ import type { VehiclePosition } from "@/types/transit";
 
 const SF_CENTER: [number, number] = [-122.4194, 37.7749];
 const DEFAULT_ZOOM = 11;
-const VEHICLE_POLL_INTERVAL = 15_000;
+const VEHICLE_POLL_INTERVAL = 60_000; // Poll every 60s (server caches for 5 min)
 const LERP_DURATION = 2000; // ms to animate between positions
 const LONG_PRESS_DURATION = 500;
 
