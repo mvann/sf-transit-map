@@ -3,7 +3,8 @@ import { AGENCIES } from "@/types/transit";
 
 const API_BASE = "http://api.511.org/transit";
 const API_KEY = process.env.TRANSIT_511_API_KEY!;
-const CACHE_TTL_MS = 60_000; // 60 seconds
+const VEHICLE_CACHE_TTL_MS = 300_000; // 5 minutes (3 agencies × 12/hr = 36 req/hr)
+const STOP_CACHE_TTL_MS = 300_000; // 5 minutes
 
 interface CacheEntry<T> {
   data: T;
@@ -12,6 +13,7 @@ interface CacheEntry<T> {
 
 let vehicleCache: CacheEntry<VehiclePosition[]> | null = null;
 let fetchInProgress: Promise<VehiclePosition[]> | null = null;
+const stopCache = new Map<string, CacheEntry<any[]>>();
 
 function parseVehicleMonitoring(
   json: Record<string, unknown>,
@@ -68,7 +70,7 @@ async function fetchAgencyVehicles(
 export async function getVehicles(): Promise<VehiclePosition[]> {
   const now = Date.now();
 
-  if (vehicleCache && now - vehicleCache.fetchedAt < CACHE_TTL_MS) {
+  if (vehicleCache && now - vehicleCache.fetchedAt < VEHICLE_CACHE_TTL_MS) {
     return vehicleCache.data;
   }
 
@@ -97,6 +99,12 @@ export async function getStopPredictions(
   agency: string,
   stopCode: string
 ): Promise<any[]> {
+  const cacheKey = `${agency}:${stopCode}`;
+  const cached = stopCache.get(cacheKey);
+  if (cached && Date.now() - cached.fetchedAt < STOP_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   const url = `${API_BASE}/StopMonitoring?api_key=${API_KEY}&agency=${agency}&stopCode=${stopCode}&format=json`;
   let json: any;
   try {
@@ -109,7 +117,7 @@ export async function getStopPredictions(
     json?.Siri?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit;
   if (!Array.isArray(visits)) return [];
 
-  return visits.slice(0, 5).map((visit: any) => {
+  const predictions = visits.slice(0, 5).map((visit: any) => {
     const journey = visit.MonitoredVehicleJourney;
     const call = journey.MonitoredCall;
     return {
@@ -124,4 +132,7 @@ export async function getStopPredictions(
       agency,
     };
   });
+
+  stopCache.set(cacheKey, { data: predictions, fetchedAt: Date.now() });
+  return predictions;
 }

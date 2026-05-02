@@ -10,7 +10,8 @@ import type { VehiclePosition } from "@/types/transit";
 
 const SF_CENTER: [number, number] = [-122.4194, 37.7749];
 const DEFAULT_ZOOM = 11;
-const VEHICLE_POLL_INTERVAL = 15_000;
+const VEHICLE_POLL_INTERVAL = 60_000; // Poll every 60s (server caches for 5 min)
+const LERP_DURATION = 2000; // ms to animate between positions
 const LONG_PRESS_DURATION = 500;
 
 let protocolAdded = false;
@@ -31,6 +32,11 @@ export default function TransitMap() {
   const routeStops = useRef<RouteStopMap>({});
   const activePopups = useRef<maplibregl.Popup[]>([]);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animFrameId = useRef<number | null>(null);
+  const vehiclePrev = useRef<Map<string, [number, number]>>(new Map());
+  const vehicleNext = useRef<Map<string, [number, number]>>(new Map());
+  const vehicleProps = useRef<Map<string, Record<string, unknown>>>(new Map());
+  const lerpStart = useRef<number>(0);
 
   const clearPredictions = useCallback(() => {
     const m = map.current;
@@ -170,6 +176,38 @@ export default function TransitMap() {
     [clearPredictions]
   );
 
+  const renderVehiclesAtT = useCallback((t: number) => {
+    const m = map.current;
+    if (!m || !m.getSource("vehicles")) return;
+
+    const features: GeoJSON.Feature[] = [];
+    for (const [id, next] of vehicleNext.current) {
+      const prev = vehiclePrev.current.get(id) ?? next;
+      const lng = prev[0] + (next[0] - prev[0]) * t;
+      const lat = prev[1] + (next[1] - prev[1]) * t;
+      features.push({
+        type: "Feature",
+        geometry: { type: "Point", coordinates: [lng, lat] },
+        properties: vehicleProps.current.get(id) as Record<string, unknown>,
+      });
+    }
+
+    (m.getSource("vehicles") as maplibregl.GeoJSONSource).setData({
+      type: "FeatureCollection",
+      features,
+    });
+  }, []);
+
+  const animateVehicles = useCallback(() => {
+    const elapsed = Date.now() - lerpStart.current;
+    const t = Math.min(1, elapsed / LERP_DURATION);
+    renderVehiclesAtT(t);
+
+    if (t < 1) {
+      animFrameId.current = requestAnimationFrame(animateVehicles);
+    }
+  }, [renderVehiclesAtT]);
+
   const updateVehicles = useCallback(async () => {
     const m = map.current;
     if (!m || !m.getSource("vehicles")) return;
@@ -179,29 +217,31 @@ export default function TransitMap() {
       if (!res.ok) return;
       const vehicles: VehiclePosition[] = await res.json();
 
-      const geojson: GeoJSON.FeatureCollection = {
-        type: "FeatureCollection",
-        features: vehicles.map((v) => ({
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: [v.longitude, v.latitude],
-          },
-          properties: {
-            vehicleId: v.vehicleId,
-            lineRef: v.lineRef,
-            lineName: v.lineName,
-            agency: v.agency,
-            bearing: v.bearing ?? 0,
-          },
-        })),
-      };
+      // Shift next -> prev, set new targets
+      vehiclePrev.current = new Map(vehicleNext.current);
+      vehicleNext.current = new Map();
+      vehicleProps.current = new Map();
 
-      (m.getSource("vehicles") as maplibregl.GeoJSONSource).setData(geojson);
+      for (const v of vehicles) {
+        const id = `${v.agency}:${v.vehicleId}`;
+        vehicleNext.current.set(id, [v.longitude, v.latitude]);
+        vehicleProps.current.set(id, {
+          vehicleId: v.vehicleId,
+          lineRef: v.lineRef,
+          lineName: v.lineName,
+          agency: v.agency,
+          bearing: v.bearing ?? 0,
+        });
+      }
+
+      // Start lerp animation
+      lerpStart.current = Date.now();
+      if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
+      animateVehicles();
     } catch (e) {
       console.error("Failed to update vehicles:", e);
     }
-  }, []);
+  }, [animateVehicles]);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -281,14 +321,28 @@ export default function TransitMap() {
         data: { type: "FeatureCollection", features: [] },
       });
 
+      // Vehicle color expression:
+      // BART: #FB8501, Caltrain: #8CC0EF, Muni Metro: #4CAF50, Muni Bus: #e6be42
+      const vehicleColor: maplibregl.ExpressionSpecification = [
+        "case",
+        ["==", ["get", "agency"], "BA"], "#c040a0",
+        ["==", ["get", "agency"], "CT"], "#c44040",
+        [
+          "all",
+          ["==", ["get", "agency"], "SF"],
+          ["in", ["get", "lineRef"], ["literal", ["J", "K", "L", "M", "N", "T", "S"]]],
+        ], "#4CAF50",
+        "#e6be42", // Muni bus default
+      ];
+
       // Outer glow
       m.addLayer({
         id: "vehicle-glow",
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 10,
-          "circle-color": "#e6be42",
+          "circle-radius": 12.5,
+          "circle-color": vehicleColor,
           "circle-blur": 1,
           "circle-opacity": 0.4,
         },
@@ -300,8 +354,8 @@ export default function TransitMap() {
         type: "circle",
         source: "vehicles",
         paint: {
-          "circle-radius": 3,
-          "circle-color": "#e6be42",
+          "circle-radius": 3.75,
+          "circle-color": vehicleColor,
           "circle-blur": 0.7,
           "circle-opacity": 0.9,
         },
@@ -366,6 +420,7 @@ export default function TransitMap() {
 
     return () => {
       if (pollTimer.current) clearInterval(pollTimer.current);
+      if (animFrameId.current) cancelAnimationFrame(animFrameId.current);
       m.remove();
       map.current = null;
     };
